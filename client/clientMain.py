@@ -3,16 +3,15 @@ import sys
 import json
 
 
-DEFAULT_SERVER_PORT = 9002
+DEFAULT_SERVER_PORT = 9000
 # Empty string indicates the server can receive requests from any network interface
 DEFAULT_HOST = ''
-# Iterative server, accepting up to 20 simultaneous client connections
-MAX_NUMBER_OF_CLIENTS = 20
 NUMBER_TO_ANALYZE = 10
 
 
 if __name__ == "__main__":
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+        client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         client_socket.connect((DEFAULT_HOST, DEFAULT_SERVER_PORT))
         print("\n(CONNECTION) Client connected to server!")
 
@@ -28,20 +27,19 @@ if __name__ == "__main__":
 
                 # Wait for list of words in order or error
                 server_response_message = client_socket.recv(1024)
-                decoded_response = server_response_message.decode("utf-8")
-
-                print("\n--------------------------------------------\n")
-                print(
-                    f"Result of the analysis for file \"{filename}\": \n")
-                if "error" in decoded_response:
+                try:
+                    decoded_response = json.loads(
+                        server_response_message.decode("utf-8"))
+                    print("\n--------------------------------------------\n")
+                    print(
+                        f"Result of the analysis for file \"{filename}\": \n")
+                    # Print ordered word list
+                    print(f" {NUMBER_TO_ANALYZE} most used words:\n")
+                    for word in decoded_response:
+                        print(word)
+                    print("\n--------------------------------------------\n")
+                except:
                     print("(ERROR) File not found")
-                    break
-
-                # Print ordered word list
-                print(f" {NUMBER_TO_ANALYZE} most used words:\n")
-                for word in decoded_response.split():
-                    print(word)
-                print("\n--------------------------------------------\n")
 
             except Exception:
                 raise Exception(
