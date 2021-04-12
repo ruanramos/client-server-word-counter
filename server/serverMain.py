@@ -62,18 +62,21 @@ class ServerConnector():
 
             text = db_manager.getFile()
 
-            print(text)
             if "errno" in text.lower():
+                print(f"(ERROR) FILE {} REQUESTED BY {self.client_socket.} WAS NOT FOUND ")
                 self.client_socket.send(text.encode())
             else:
                 text_analyzer = TextAnalizer(text)
                 result = text_analyzer.analyze(NUMBER_TO_ANALYZE)
-                print(result)
                 self.client_socket.send(json.dumps(
                     list(result.values())).encode())
 
 
 class DatabaseManager():
+    """
+    Database logic here. For this application,
+    only local saved files
+    """
 
     def __init__(self, path):
         self.path = path

@@ -39,7 +39,7 @@ if __name__ == "__main__":
                         print(word)
                     print("\n--------------------------------------------\n")
                 except:
-                    print("(ERROR) File not found")
+                    print("(ERROR) File not found. Please, try again.")
 
             except Exception:
                 raise Exception(
