@@ -1,10 +1,15 @@
-from ..utils.constants import DEFAULT_SERVER_PORT, DEFAULT_HOST, MAX_NUMBER_OF_CLIENTS
-
 import socket
 import logging
-from logic.MenuOptionHandler import MenuOptionHandler
 import json
 import re
+import os
+
+DEFAULT_SERVER_PORT = 9000
+# Empty string indicates the server can receive requests from any network interface
+DEFAULT_HOST = ''
+# Iterative server with no queued clients
+MAX_NUMBER_OF_CLIENTS = 1
+NUMBER_TO_ANALYZE = 10
 
 
 class ServerConnector():
@@ -12,90 +17,98 @@ class ServerConnector():
     This class handles server connection to the clients
     """
 
-    def __init__(self, host, port, numToListenTo):
+    def __init__(self, host, port, num_to_listen_to):
         super().__init__()
         self.host = host
         self.port = port
-        self.numToListenTo = numToListenTo
-        self.clientSocket = None
+        self.num_to_listen_to = num_to_listen_to
+        self.client_socket = None
         self.address = None
 
-    def acceptConnections(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serverSocket:
-            serverSocket.bind((self.host, self.port))
-            serverSocket.listen(self.numToListenTo)
+    def accept_connections(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_socket.bind((self.host, self.port))
+            server_socket.listen(self.num_to_listen_to)
 
             while True:
                 # Listening to connections
                 print(
-                    f"(CONNECTION) Server is waiting for client connection")
-                self.clientSocket, self.address = serverSocket.accept()
+                    f"(CONNECTION) Server is waiting for client connection...")
+                self.client_socket, self.address = server_socket.accept()
 
-                with self.clientSocket:
+                with self.client_socket:
                     print(f"(CONNECTION) Connected by {self.address}")
-                    self.connectionLoop()
+                    self.connection_loop()
 
                 # End of connection with the client
                 print("(CONNECTION) Lost connection to client")
 
-    def connectionLoop(self):
+    def connection_loop(self):
         while True:
             # waits for filename
-            print("(APP) Filename: ")
-            receivedObj = self.clientSocket.recv(1024)
-            if not receivedObj:
+            print("(APP) Waiting for filename... ")
+            received_obj = self.client_socket.recv(1024)
+            if not received_obj:
                 break
-            
+
             # unserialize data
-            filename: str = json.loads(receivedObj)
+            filename = received_obj.decode("utf-8")
+            print(
+                f"(APP) Received {filename} as input from client {self.address}")
 
-            #
+            db_manager = DatabaseManager(
+                os.path.abspath(filename).split('/', 1)[0] + 'server/' + filename)
 
-    """ class MessageHandler():
-        def composeMessage(self, *pairs, **opts):
-            message = {}
-            for pair in pairs:
-                message[pair[0]] = pair[1]
-            for key, value in opts.items():
-                if key == "encode" and value:
-                    return self.encode(message)
-            return message
+            text = db_manager.getFile()
 
-        def updateMessage(self, previousMessage, *pairs, **opts):
-            for pair in pairs:
-                previousMessage[pair[0]] = pair[1]
-            for key, value in opts.items():
-                if key == "encode" and value:
-                    return self.encode(previousMessage)
-            return previousMessage
-
-        def encode(self, obj):
-            return str.encode(json.dumps(obj))
-
-        def sendMessage(self, message, clientSocket):
-            clientSocket.send(message) """
+            print(text)
+            if "errno" in text.lower():
+                self.client_socket.send(text.encode())
+            else:
+                text_analyzer = TextAnalizer(text)
+                result = text_analyzer.analyze(NUMBER_TO_ANALYZE)
+                print(result)
+                self.client_socket.send(json.dumps(
+                    list(result.values())).encode())
 
 
-""" class TextAnalizer():
+class DatabaseManager():
+
+    def __init__(self, path):
+        self.path = path
+
+    def getFile(self):
+        try:
+            with open(f"{self.path}", 'r') as f:
+                data = f.read()
+            return data
+        except FileNotFoundError as e:
+            return str(e)
+
+
+class TextAnalizer():
+    """Analisys logic here"""
 
     def __init__(self, text):
         super().__init__()
         self.text = text
 
-    def getWordsCount(self):
+    def get_words_count(self):
         count = {}
-        for word in re.split('[ ,“.!?"”\n-]*', self.text):
+        words = re.compile(
+            "(?:(?:[^a-zA-Z]+')|(?:'[^a-zA-Z]+))|(?:[^a-zA-Z']+)").split(self.text)
+        for word in words:
             if word.upper() in count:
                 count[word.upper()] += 1
             else:
                 count[word.upper()] = 1
         return count
 
-    def analize(self, numberOfWords):
-        # Analize logic here
+    def analyze(self, numberOfWords):
         obj = {}
         sortedCount = {k: v for k, v in sorted(
-            self.getWordsCount().items(),
+            self.get_words_count().items(),
             key=lambda item: item[1],
             reverse=True
         )}
@@ -103,13 +116,12 @@ class ServerConnector():
             if i >= numberOfWords:
                 break
             obj[i] = j
-        return obj """
+        return obj
 
 
 if __name__ == "__main__":
     """Server entry point"""
-
-    serverConnector = ServerConnector(
+    server_connector = ServerConnector(
         DEFAULT_HOST, DEFAULT_SERVER_PORT, MAX_NUMBER_OF_CLIENTS)
-    serverConnector.accept_connections()
-    print(f"Closed Connection to {serverConnector.address}")
+    server_connector.accept_connections()
+    print(f"Closed Connection to {server_connector.address}")
