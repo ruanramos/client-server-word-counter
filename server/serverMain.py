@@ -3,6 +3,8 @@ import logging
 import json
 import re
 import os
+import select
+import sys
 
 DEFAULT_SERVER_PORT = 9000
 # Empty string indicates the server can receive requests from any network interface
@@ -30,21 +32,34 @@ class ServerConnector():
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server_socket.bind((self.host, self.port))
             server_socket.listen(self.num_to_listen_to)
+            server_socket.setblocking(False)
+
+            # Possible interfaces
+            entries = [sys.stdin, server_socket]
 
             while True:
+
                 # Listening to connections
                 print(
                     f"(CONNECTION) Server is waiting for client connection...")
-                self.client_socket, self.address = server_socket.accept()
+                ready, wright, error = select.select(entries, [], [])
+                for readyEntry in ready:
+                    if readyEntry == server_socket:
+                        self.client_socket, self.address = server_socket.accept()
 
-                with self.client_socket:
-                    print(f"(CONNECTION) Connected by {self.address}")
-                    self.connection_loop()
+                        with self.client_socket:
+                            print(f"(CONNECTION) Connected by {self.address}")
+                            self.answer_requests()
+                    elif readyEntry == sys.stdin:
+                        command = input()
+                        if command in ["quit", "q", "exit", "close"]:
+                            server_socket.close()
+                            exit(0)
 
                 # End of connection with the client
                 print("(CONNECTION) Lost connection to client")
 
-    def connection_loop(self):
+    def answer_requests(self):
         while True:
             # waits for filename
             print("(APP) Waiting for filename... ")
@@ -63,7 +78,8 @@ class ServerConnector():
             text = db_manager.getFile()
 
             if "errno" in text.lower():
-                print(f"(ERROR) FILE {filename} REQUESTED BY {self.address} WAS NOT FOUND ")
+                print(
+                    f"(ERROR) FILE {filename} REQUESTED BY {self.address} WAS NOT FOUND ")
                 self.client_socket.send(text.encode())
             else:
                 text_analyzer = TextAnalizer(text)
