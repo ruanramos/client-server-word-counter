@@ -8,7 +8,7 @@ DEFAULT_SERVER_PORT = 9000
 # Empty string indicates the server can receive requests from any network interface
 DEFAULT_HOST = ''
 # Iterative server with no queued clients
-MAX_NUMBER_OF_CLIENTS = 1
+MAX_NUMBER_OF_CLIENTS = 2
 NUMBER_TO_ANALYZE = 10
 
 
@@ -63,7 +63,7 @@ class ServerConnector():
             text = db_manager.getFile()
 
             if "errno" in text.lower():
-                print(f"(ERROR) FILE {} REQUESTED BY {self.client_socket.} WAS NOT FOUND ")
+                print(f"(ERROR) FILE {filename} REQUESTED BY {self.address} WAS NOT FOUND ")
                 self.client_socket.send(text.encode())
             else:
                 text_analyzer = TextAnalizer(text)
