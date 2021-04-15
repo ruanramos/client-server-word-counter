@@ -5,12 +5,27 @@ import re
 import os
 import select
 import sys
+import threading
+
+"""
+
+Server with concurrency added to the select call
+
+Clients are being treated concurrently, but only in one processor,
+by listening connections and threading the response flux for each
+client (no sub-processes)
+
+1- Server wont close with 'quit' command until all clients are finished
+2- Server wont accept connections after 'quit' command is sent
+3- Server can receive multiple connections and treat multiple responses
+
+"""
+
 
 DEFAULT_SERVER_PORT = 9000
 # Empty string indicates the server can receive requests from any network interface
 DEFAULT_HOST = ''
-# Iterative server with no queued clients
-MAX_NUMBER_OF_CLIENTS = 2
+MAX_NUMBER_OF_CLIENTS = 5
 NUMBER_TO_ANALYZE = 10
 
 
@@ -24,8 +39,11 @@ class ServerConnector():
         self.host = host
         self.port = port
         self.num_to_listen_to = num_to_listen_to
-        self.client_socket = None
-        self.address = None
+
+        # Possible interfaces (commands, client request, connection request)
+        self.entries = [sys.stdin]
+        self.connection_history = {}  # Could receive a timestamp or more data too
+        self.client_threads = []  # For join purposes
 
     def accept_connections(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
@@ -33,44 +51,57 @@ class ServerConnector():
             server_socket.bind((self.host, self.port))
             server_socket.listen(self.num_to_listen_to)
             server_socket.setblocking(False)
-
-            # Possible interfaces
-            entries = [sys.stdin, server_socket]
+            self.entries.append(server_socket)
 
             while True:
 
                 # Listening to connections
                 print(
-                    f"(CONNECTION) Server is waiting for client connection...")
-                ready, wright, error = select.select(entries, [], [])
-                for readyEntry in ready:
-                    if readyEntry == server_socket:
-                        self.client_socket, self.address = server_socket.accept()
+                    f"({bcolors.WARNING}CONNECTION) Server is waiting for commands or connections...{bcolors.ENDC}")
+                read, wright, error = select.select(self.entries, [], [])
+                for read_ready in read:
 
-                        with self.client_socket:
-                            print(f"(CONNECTION) Connected by {self.address}")
-                            self.answer_requests()
-                    elif readyEntry == sys.stdin:
+                    if read_ready == server_socket:  # New connection request
+                        client_socket, address = server_socket.accept()
+                        self.connection_history[client_socket] = address
+                        print(
+                            f"{bcolors.OKCYAN}(CONNECTION) Connected by {address}{bcolors.ENDC}")
+                        client_thread = threading.Thread(
+                            target=self.answer_requests, args=(client_socket, address))
+                        self.client_threads.append(
+                            client_thread)  # References for join
+                        client_thread.start()
+
+                    elif read_ready == sys.stdin:
+                        # Command line input from server user
                         command = input()
-                        if command in ["quit", "q", "exit", "close"]:
+                        if command in ["quit", "q", "exit", "close"]:  # End server
+                            for client_thread in self.client_threads:
+                                client_thread.join()
+                                self.client_threads.remove(client_thread)
                             server_socket.close()
                             exit(0)
 
-                # End of connection with the client
-                print("(CONNECTION) Lost connection to client")
+                        elif command == 'hist':  # Connections history requested
+                            print(
+                                f"(CONNECTION) {str(self.connections.values())}")
 
-    def answer_requests(self):
+    def answer_requests(self, client_socket, address):
         while True:
             # waits for filename
-            print("(APP) Waiting for filename... ")
-            received_obj = self.client_socket.recv(1024)
+            print(
+                f"{bcolors.OKCYAN}(APP) Waiting for filenames from {address}{bcolors.ENDC}")
+            received_obj = client_socket.recv(1024)
             if not received_obj:
+                # End of connection with the client
+                print(
+                    f"{bcolors.WARNING}(CONNECTION) Lost connection to client {address}{bcolors.ENDC}")
                 break
 
             # unserialize data
             filename = received_obj.decode("utf-8")
             print(
-                f"(APP) Received {filename} as input from client {self.address}")
+                f"{bcolors.OKBLUE}(APP) Received {filename} as input from client {address}{bcolors.ENDC}")
 
             db_manager = DatabaseManager(
                 os.path.abspath(filename).split('/', 1)[0] + 'server/' + filename)
@@ -79,12 +110,14 @@ class ServerConnector():
 
             if "errno" in text.lower():
                 print(
-                    f"(ERROR) FILE {filename} REQUESTED BY {self.address} WAS NOT FOUND ")
-                self.client_socket.send(text.encode())
+                    f"{bcolors.FAIL}(ERROR) FILE{bcolors.BOLD} {filename}{bcolors.ENDC}{bcolors.FAIL} REQUESTED BY {address} WAS NOT FOUND{bcolors.ENDC}")
+                client_socket.send(text.encode())
             else:
                 text_analyzer = TextAnalizer(text)
                 result = text_analyzer.analyze(NUMBER_TO_ANALYZE)
-                self.client_socket.send(json.dumps(
+                print(
+                    f"{bcolors.OKGREEN}(APP) FILE {filename} ANALYSIS SENT BACK TO {address}{bcolors.ENDC}")
+                client_socket.send(json.dumps(
                     list(result.values())).encode())
 
 
@@ -136,6 +169,18 @@ class TextAnalizer():
                 break
             obj[i] = j
         return obj
+
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 
 if __name__ == "__main__":
